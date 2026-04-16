@@ -23,7 +23,6 @@ UTILS_FILE = f"{VLLM_DIR}/csrc/quantization/fp4/nvfp4_utils.cuh"
 if not os.path.exists(UTILS_FILE):
     # Try alternative paths
     alt_paths = [
-        f"{VLLM_DIR}/csrc/quantization/fp4/nvfp4_utils.cuh",
         f"{VLLM_DIR}/csrc/quantization/nvfp4/nvfp4_utils.cuh",
     ]
     found = False
