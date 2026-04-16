@@ -4,7 +4,7 @@
     <strong>NVFP4 inference on NVIDIA DGX Spark GB10 — finally faster than AWQ</strong>
   </p>
   <p align="center">
-    <a href="https://hub.docker.com/r/avarok/dgx-vllm-nvfp4-kernel"><img src="https://img.shields.io/badge/Docker%20Hub-v22-blue?logo=docker" alt="Docker Hub"></a>
+    <a href="https://hub.docker.com/r/avarok/dgx-vllm-nvfp4-kernel"><img src="https://img.shields.io/badge/Docker%20Hub-v23-blue?logo=docker" alt="Docker Hub"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-green" alt="License"></a>
     <a href="https://github.com/Avarok-Cybersecurity/dgx-vllm"><img src="https://img.shields.io/badge/Platform-DGX%20Spark%20GB10-76B900?logo=nvidia" alt="Platform"></a>
   </p>
@@ -44,7 +44,7 @@ The first open-source vLLM image to unlock full NVFP4 performance on NVIDIA DGX 
 ### Pull and run (~67 tok/s with MTP)
 
 ```bash
-docker pull avarok/dgx-vllm-nvfp4-kernel:v22
+docker pull avarok/dgx-vllm-nvfp4-kernel:v23
 
 docker run -d --name vllm-nvfp4 \
   --network host --gpus all --ipc=host \
@@ -53,11 +53,11 @@ docker run -d --name vllm-nvfp4 \
   -e VLLM_TEST_FORCE_FP8_MARLIN=1 \
   -e VLLM_NVFP4_GEMM_BACKEND=marlin \
   -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-  -e MODEL=nvidia/Qwen3-Next-80B-A3B-Instruct-NVFP4 \
+  -e MODEL=Sehyo/Qwen3.5-122B-A10B-NVFP4 \
   -e PORT=8888 -e GPU_MEMORY_UTIL=0.90 \
   -e MAX_MODEL_LEN=65536 -e MAX_NUM_SEQS=128 \
   -e VLLM_EXTRA_ARGS="--attention-backend flashinfer --kv-cache-dtype fp8" \
-  avarok/dgx-vllm-nvfp4-kernel:v22 serve
+  avarok/dgx-vllm-nvfp4-kernel:v23 serve
 ```
 
 To enable MTP speculative decoding, add to `VLLM_EXTRA_ARGS`:
@@ -74,7 +74,7 @@ The Docker image takes 30–60 minutes to build. It compiles vLLM, CUTLASS kerne
 ```bash
 git clone https://github.com/Avarok-Cybersecurity/dgx-vllm.git
 cd dgx-vllm
-docker build -t dgx-vllm:v22 .
+docker build -t dgx-vllm:v23 .
 ```
 
 #### Optional: Sparse FP4 2:4 kernel (saves 9 GiB GPU memory)
@@ -87,7 +87,7 @@ To build and install the kernel inside a running container:
 # Start a container with the repo mounted
 docker run -it --gpus all --ipc=host \
   -v $(pwd)/sparse_fp4_kernel:/workspace/sparse_fp4_kernel \
-  dgx-vllm:v22 bash
+  dgx-vllm:v23 bash
 
 # Inside the container:
 cd /workspace/sparse_fp4_kernel
@@ -243,7 +243,7 @@ IEEE 754 round-to-nearest-even for E2M1, matching hardware behavior exactly. App
 | Component | Version |
 |-----------|---------|
 | Base image | `nvidia/cuda:13.0.2-cudnn-devel-ubuntu24.04` |
-| vLLM | v0.16.0rc2 (pinned at `3b30e6150`) |
+| vLLM | v0.19.0 (stable, Qwen3.5 native support) |
 | PyTorch | 2.10.0+cu130 |
 | Triton | 3.6.0 |
 | FlashInfer | Latest pre-release |
@@ -253,11 +253,12 @@ IEEE 754 round-to-nearest-even for E2M1, matching hardware behavior exactly. App
 
 | Property | Value |
 |----------|-------|
-| Model | Qwen3-Next-80B-A3B-Instruct-NVFP4 |
-| Parameters | 80B total, ~3B active per token |
-| Architecture | Hybrid (Attention + Mamba SSM), MoE (512 experts, top-10) |
+| Model (default) | Qwen3.5-122B-A10B-NVFP4 |
+| Parameters | 122B total, ~10B active per token |
+| Architecture | Hybrid (Attention + GDN), MoE (shared experts) |
 | Quantization | NVFP4 (E2M1 weights + FP8 E4M3 block scales) |
 | Context | Up to 128K tokens |
+| Also supported | Qwen3-Next-80B-A3B-Instruct-NVFP4, FP8 models |
 
 ---
 
@@ -282,10 +283,10 @@ IEEE 754 round-to-nearest-even for E2M1, matching hardware behavior exactly. App
 ### Container modes
 
 ```bash
-docker run ... avarok/dgx-vllm-nvfp4-kernel:v22 serve        # vLLM API server (default)
-docker run ... avarok/dgx-vllm-nvfp4-kernel:v22 ray-head     # Ray head node
-docker run ... avarok/dgx-vllm-nvfp4-kernel:v22 ray-worker   # Ray worker node
-docker run ... avarok/dgx-vllm-nvfp4-kernel:v22 bash         # Interactive shell
+docker run ... avarok/dgx-vllm-nvfp4-kernel:v23 serve        # vLLM API server (default)
+docker run ... avarok/dgx-vllm-nvfp4-kernel:v23 ray-head     # Ray head node
+docker run ... avarok/dgx-vllm-nvfp4-kernel:v23 ray-worker   # Ray worker node
+docker run ... avarok/dgx-vllm-nvfp4-kernel:v23 bash         # Interactive shell
 ```
 
 ---
@@ -365,7 +366,8 @@ docker run ... avarok/dgx-vllm-nvfp4-kernel:v22 bash         # Interactive shell
 | v21 | Software E2M1 in C++ + CUDA graphs | 35.0 tok/s |
 | v21 + Marlin | Marlin MoE + dense GEMM backends | 40.2 tok/s |
 | v21 + MTP | MTP speculative decoding (2 tokens) | 59.9 tok/s |
-| **v22** | **Pin vLLM, re-enable torch.compile, 64K benchmarks** | **~67 tok/s avg** |
+| v22 | Pin vLLM, re-enable torch.compile, 64K benchmarks | ~67 tok/s avg |
+| **v23** | **Upgrade vLLM v0.19.0, Qwen3.5-MoE support (122B-A10B-NVFP4)** | **TBD** |
 
 ---
 

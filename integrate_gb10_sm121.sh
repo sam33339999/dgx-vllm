@@ -29,8 +29,17 @@ elif [ -d "csrc/quantization/w8a8/cutlass/moe" ]; then
     DISPATCHER_FILE="csrc/quantization/w8a8/cutlass/scaled_mm_entry.cu"
     echo "Using direct csrc/ structure"
 else
-    echo "ERROR: vLLM directory not found"
-    exit 1
+    # Fallback: search for the directory
+    echo "Standard paths not found, searching..."
+    SCALED_MM_DIR=$(find . -maxdepth 6 -type d -name "cutlass" -path "*/w8a8/*" 2>/dev/null | head -1)
+    if [ -n "$SCALED_MM_DIR" ]; then
+        DISPATCHER_FILE="${SCALED_MM_DIR}/scaled_mm_entry.cu"
+        echo "Found via search: $SCALED_MM_DIR"
+    else
+        echo "ERROR: vLLM quantization/w8a8/cutlass directory not found"
+        find . -maxdepth 5 -type d -name "quantization" 2>/dev/null | head -5
+        exit 1
+    fi
 fi
 
 echo "✓ Will use SM100 MOE kernels for SM_121"

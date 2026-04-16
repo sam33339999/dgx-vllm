@@ -7,7 +7,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_NAME="dgx-vllm"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
-IMAGE_VERSION="${IMAGE_VERSION:-15}"
+IMAGE_VERSION="${IMAGE_VERSION:-23}"
 REMOTE_NODE="${REMOTE_NODE:-10.10.10.2}"
 REMOTE_USER="${REMOTE_USER:-nologik}"
 
@@ -20,8 +20,8 @@ echo ""
 
 # Show version info
 echo "Component Versions:"
-echo "  vLLM: main branch (latest)"
-echo "  PyTorch: nightly (CUDA 13.0)"
+echo "  vLLM: v0.19.0 (stable, Qwen3.5 support)"
+echo "  PyTorch: stable (CUDA 13.0)"
 echo "  FlashInfer: latest pre-release"
 echo "  XGrammar: latest stable"
 echo "  CUTLASS: enabled (FP4/FP6/FP8)"

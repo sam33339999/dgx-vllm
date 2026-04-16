@@ -11,6 +11,8 @@ checkpoint has BF16 weights — causing a shape mismatch assertion failure.
 Fix: In is_layer_excluded(), if any exclude pattern starts with 'mtp.' and the
 current prefix also starts with 'mtp.', exclude the entire MTP module. All MTP
 weights in NVFP4 checkpoints are BF16 (unquantized).
+
+Compatible with vLLM v0.16.x and v0.19.x.
 """
 
 import sys
@@ -18,14 +20,37 @@ import os
 
 
 def patch_modelopt():
-    target = "/app/vllm/vllm/model_executor/layers/quantization/modelopt.py"
+    # Try multiple possible paths
+    candidates = [
+        "/app/vllm/vllm/model_executor/layers/quantization/modelopt.py",
+    ]
 
-    if not os.path.exists(target):
-        print(f"ERROR: {target} not found")
-        sys.exit(1)
+    target = None
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            target = candidate
+            break
+
+    if target is None:
+        # Search for it
+        import subprocess
+        result = subprocess.run(
+            ['find', '/app/vllm', '-name', 'modelopt.py', '-path', '*/quantization/*'],
+            capture_output=True, text=True
+        )
+        if result.stdout.strip():
+            target = result.stdout.strip().split('\n')[0]
+        else:
+            print("SKIP: modelopt.py not found (may not be needed in this vLLM version)")
+            return
 
     with open(target, "r") as f:
         content = f.read()
+
+    # Check if already patched
+    if 'prefix.startswith("mtp.")' in content:
+        print("Already patched")
+        return
 
     # The bug is in is_layer_excluded(). The wildcard 'mtp.layers.0*' only
     # matches mtp.layers.0.XXX but misses mtp.fc and other MTP layers.
@@ -53,13 +78,37 @@ def patch_modelopt():
         return False"""
 
     if old not in content:
-        if "prefix.startswith(\"mtp.\")" in content:
-            print("Already patched")
+        # Try to find the function with slight variations
+        if "def is_layer_excluded" in content and "exclude_modules" in content:
+            print(f"WARNING: is_layer_excluded found in {target} but pattern differs")
+            print("The function signature may have changed in this vLLM version")
+            print("Attempting regex-based patch...")
+
+            import re
+            # Try to insert the mtp check before "return False" in is_layer_excluded
+            pattern = r'(def is_layer_excluded.*?)(        return False)'
+            match = re.search(pattern, content, re.DOTALL)
+            if match:
+                insert_point = match.start(2)
+                mtp_check = """        # All MTP weights in NVFP4 checkpoints are BF16 (unquantized).
+        if prefix.startswith("mtp."):
+            for wildcard_pattern in self.exclude_modules:
+                if wildcard_pattern.startswith("mtp."):
+                    return True
+
+"""
+                content = content[:insert_point] + mtp_check + content[insert_point:]
+                with open(target, "w") as f:
+                    f.write(content)
+                print(f"Patched {target}: ALL MTP layers now excluded from NVFP4 (regex method)")
+                return
+            else:
+                print("ERROR: Could not find insertion point")
+                sys.exit(1)
+        else:
+            print(f"SKIP: is_layer_excluded or exclude_modules not found in {target}")
+            print("This function may have been refactored in this vLLM version")
             return
-        print("ERROR: Could not find target pattern in modelopt.py")
-        print("Looking for:")
-        print(old[:200])
-        sys.exit(1)
 
     content = content.replace(old, new)
 

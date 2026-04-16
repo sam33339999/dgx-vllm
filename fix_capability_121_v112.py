@@ -2,17 +2,21 @@
 """
 v112 (simplified v17): Route capability 121 to SM_120 kernels.
 
-Upstream vLLM 0.16.0 already uses >= 120 range checks in most files.
+Upstream vLLM may already use >= 120 range checks in most files.
 Only scaled_mm_entry.cu needs a minor fix: add upper bound to >= 120 check.
 
 Changes:
   - version_num >= 120 -> version_num >= 120 && version_num < 130
+  - version_num == 120 -> version_num >= 120 && version_num < 130
   - Error message update to mention 120
+
+Compatible with vLLM v0.16.x and v0.19.x.
 """
 
 import re
 import os
 import sys
+import subprocess
 
 
 def fix_scaled_mm_entry(file_path):
@@ -72,17 +76,36 @@ if __name__ == '__main__':
     print(f"vLLM root: {vllm_root}")
     print()
 
-    # Only patch the primary dispatcher - other files already handle 121 upstream
-    primary = os.path.join(vllm_root, 'csrc/quantization/w8a8/cutlass/scaled_mm_entry.cu')
+    # Try multiple possible paths for the primary dispatcher
+    candidates = [
+        os.path.join(vllm_root, 'csrc/quantization/w8a8/cutlass/scaled_mm_entry.cu'),
+        os.path.join(vllm_root, 'csrc/quantization/cutlass_w8a8/scaled_mm_entry.cu'),
+    ]
 
-    if os.path.exists(primary):
-        fixed = fix_scaled_mm_entry(primary)
-        if fixed:
-            print("\nCapability 121 will now route to SM_120 kernels.")
+    primary = None
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            primary = candidate
+            break
+
+    if primary is None:
+        # Search for it
+        print("Primary dispatcher not found at expected paths, searching...")
+        result = subprocess.run(
+            ['find', vllm_root, '-name', 'scaled_mm_entry.cu', '-type', 'f'],
+            capture_output=True, text=True
+        )
+        if result.stdout.strip():
+            primary = result.stdout.strip().split('\n')[0]
+            print(f"Found dispatcher at: {primary}")
         else:
-            print("\nAlready patched or no changes needed.")
+            print("ERROR: scaled_mm_entry.cu not found anywhere")
+            sys.exit(1)
+
+    fixed = fix_scaled_mm_entry(primary)
+    if fixed:
+        print("\nCapability 121 will now route to SM_120 kernels.")
     else:
-        print(f"ERROR: Primary dispatcher not found: {primary}")
-        sys.exit(1)
+        print("\nAlready patched or no changes needed.")
 
     print("=" * 70)

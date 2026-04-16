@@ -85,7 +85,7 @@ case "$MODE" in
 
     if [[ -z "${MODEL}" ]]; then
       echo "ERROR: MODEL environment variable must be set for serve mode"
-      echo "Example: MODEL=DevQuasar/Qwen.Qwen3-Next-80B-A3B-Instruct-FP8-Dynamic"
+      echo "Example: MODEL=Sehyo/Qwen3.5-122B-A10B-NVFP4"
       exit 1
     fi
 

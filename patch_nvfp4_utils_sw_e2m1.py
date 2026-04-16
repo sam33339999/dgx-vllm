@@ -14,9 +14,38 @@ activation_nvfp4_quant_fusion_kernels.cu to compile for SM121.
 """
 
 import sys
+import os
 
 VLLM_DIR = "/app/vllm"
 UTILS_FILE = f"{VLLM_DIR}/csrc/quantization/fp4/nvfp4_utils.cuh"
+
+# Check if file exists (path may differ in newer vLLM)
+if not os.path.exists(UTILS_FILE):
+    # Try alternative paths
+    alt_paths = [
+        f"{VLLM_DIR}/csrc/quantization/fp4/nvfp4_utils.cuh",
+        f"{VLLM_DIR}/csrc/quantization/nvfp4/nvfp4_utils.cuh",
+    ]
+    found = False
+    for alt in alt_paths:
+        if os.path.exists(alt):
+            UTILS_FILE = alt
+            found = True
+            break
+    if not found:
+        print(f"WARNING: nvfp4_utils.cuh not found at expected paths")
+        print("  Searching for it...")
+        import subprocess
+        result = subprocess.run(
+            ["find", VLLM_DIR, "-name", "nvfp4_utils.cuh", "-type", "f"],
+            capture_output=True, text=True
+        )
+        if result.stdout.strip():
+            UTILS_FILE = result.stdout.strip().split('\n')[0]
+            print(f"  Found at: {UTILS_FILE}")
+        else:
+            print("  ERROR: nvfp4_utils.cuh not found anywhere in vLLM")
+            sys.exit(1)
 
 # Software E2M1 helper - inserted after "namespace vllm {"
 SW_E2M1_HELPER = r"""

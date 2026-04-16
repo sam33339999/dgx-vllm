@@ -36,7 +36,7 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - HEAD_IP=10.10.10.1
-      - MODEL=DevQuasar/Qwen.Qwen3-Next-80B-A3B-Instruct-FP8-Dynamic
+      - MODEL=Sehyo/Qwen3.5-122B-A10B-NVFP4
       - PORT=8888
       - TENSOR_PARALLEL_SIZE=2
       - MAX_MODEL_LEN=131072

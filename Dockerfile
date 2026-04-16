@@ -1,10 +1,10 @@
 FROM nvidia/cuda:13.0.2-cudnn-devel-ubuntu24.04
 
 # ============================================================================
-# vLLM Docker Image for DGX Spark GB10
+# vLLM Docker Image for DGX Spark GB10 — v23 (Qwen3.5 Upgrade)
 # ============================================================================
 # Features:
-# - vLLM latest from main (auto-updated at build time)
+# - vLLM v0.19.0 (stable release, Qwen3.5 model support)
 # - PyTorch stable with CUDA 13.0 (ARM64 compatible)
 # - Triton 3.6.0 with SM_121 support
 # - FlashInfer latest pre-release (patched for sm_121a)
@@ -13,7 +13,13 @@ FROM nvidia/cuda:13.0.2-cudnn-devel-ubuntu24.04
 # - GB10-optimized MoE Triton config (+65.7% throughput)
 # - SM_121 capability routing to SM_120 kernels
 # - CUTLASS FP8 disabled for SM_121 (PyTorch fallback)
-# - torch.compile RE-ENABLED for NVFP4 (v22: Marlin backend bypasses AutogradCUDA issue)
+# - torch.compile RE-ENABLED for NVFP4 (Marlin backend bypasses AutogradCUDA)
+# - Qwen3.5-MoE support (GDN layers, 122B-A10B, NVFP4 checkpoint)
+#
+# Upgrade from v22:
+# - vLLM: v0.16.0rc2 (3b30e6150) → v0.19.0 (stable)
+# - Added native Qwen3.5 model support (qwen3_5.py + qwen3_5_mtp.py)
+# - All GB10 patches updated for v0.19.0 compatibility
 #
 # Build time: 30-60 minutes
 # Target: NVIDIA GB10 (sm_121, Compute Capability 12.1)
@@ -56,9 +62,10 @@ ENV PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cu130
 # Reinstall PyTorch CUDA after flashinfer (which just downgraded it)
 RUN pip install torch==2.10.0+cu130 torchvision==0.25.0+cu130 torchaudio==2.10.0+cu130
 
-# Clone vLLM (pinned to known-good revision for reproducible builds)
+# Clone vLLM v0.19.0 (stable release with Qwen3.5 support)
+# v0.19.0 includes qwen3_5.py + qwen3_5_mtp.py model definitions natively
 RUN git clone https://github.com/vllm-project/vllm.git && \
-    cd vllm && git checkout 3b30e6150777de549b11f67dde3ecc0d3b1f3f50
+    cd vllm && git checkout v0.19.0
 WORKDIR /app/vllm
 
 # Prepare for existing torch
@@ -84,27 +91,27 @@ RUN chmod +x /tmp/patch_cccl_fp4.sh && /tmp/patch_cccl_fp4.sh
 # Enables CUTLASS kernels for GB10 (12.1) - adds SM_121 support
 # Must add 12.0f and 12.1f to multiple architecture lists:
 # 1. CUDA_SUPPORTED_ARCHS - filters all architectures
-# 2. SCALED_MM_ARCHS - FP8 quantization kernels (3 locations)
+# 2. SCALED_MM_ARCHS - FP8 quantization kernels
 # 3. FP4_ARCHS - ENABLED (12.1f - uses our __nv_fp4_e2m1 implementation!)
 # 4. NVFP4_ARCHS - ENABLED (12.1f - uses our complete FP4 intrinsics!)
 # 5. MLA_ARCHS - Multi-head latent attention
 # 6. CUTLASS_MOE_DATA_ARCHS - MoE data handling
 #
 # NOTE: DUAL FP4 support - CUTLASS kernels + custom extension (cutlass_nvfp4/)
-# Using sed to be resilient to vLLM version changes
+# Using pattern-based sed for resilience across vLLM versions
 # ============================================================================
 RUN if [ -f CMakeLists.txt ]; then \
-    # Add 12.1 to CUDA_SUPPORTED_ARCHS for CUDA 13.0+ \
-    sed -i 's/set(CUDA_SUPPORTED_ARCHS "7\.5;8\.0;8\.6;8\.7;8\.9;9\.0;10\.0;11\.0;12\.0")/set(CUDA_SUPPORTED_ARCHS "7.5;8.0;8.6;8.7;8.9;9.0;10.0;11.0;12.0;12.1")/g' CMakeLists.txt && \
-    # Add 12.0f and 12.1f to SCALED_MM_ARCHS (SM100 kernels) - 3 instances \
+    # Add 12.1 to CUDA_SUPPORTED_ARCHS if not already present \
+    if ! grep -q '12\.1' CMakeLists.txt || ! grep 'CUDA_SUPPORTED_ARCHS' CMakeLists.txt | grep -q '12\.1'; then \
+        sed -i '/set(CUDA_SUPPORTED_ARCHS/s/12\.0"/12.0;12.1"/' CMakeLists.txt; \
+    fi && \
+    # Add 12.0f and 12.1f to SCALED_MM_ARCHS (pattern-based, all instances) \
     sed -i 's/cuda_archs_loose_intersection(SCALED_MM_ARCHS "10\.0f;11\.0f"/cuda_archs_loose_intersection(SCALED_MM_ARCHS "10.0f;11.0f;12.0f;12.1f"/g' CMakeLists.txt && \
-    # NOTE: FP4_ARCHS for SM_120 is NOT modified - nvfp4_quant_kernels.cu uses \
-    # cvt.e2m1x2 instruction which doesn't exist on GB10 (sm_121). \
-    # Missing symbols (scaled_fp4_quant_sm1xxa etc) are handled by nvfp4_stubs.cu \
     # Add 12.1f to MLA_ARCHS (multi-head latent attention) \
-    sed -i 's/cuda_archs_loose_intersection(MLA_ARCHS "10\.0f;11\.0f;12\.0f"/cuda_archs_loose_intersection(MLA_ARCHS "10.0f;11.0f;12.0f;12.1f"/g' CMakeLists.txt && \
+    sed -i '/cuda_archs_loose_intersection(MLA_ARCHS/s/12\.0f"/12.0f;12.1f"/g' CMakeLists.txt && \
     # Add 12.1f to CUTLASS_MOE_DATA_ARCHS (MoE data handling) \
-    sed -i 's/cuda_archs_loose_intersection(CUTLASS_MOE_DATA_ARCHS "9\.0a;10\.0f;11\.0f;12\.0f"/cuda_archs_loose_intersection(CUTLASS_MOE_DATA_ARCHS "9.0a;10.0f;11.0f;12.0f;12.1f"/g' CMakeLists.txt; \
+    sed -i '/cuda_archs_loose_intersection(CUTLASS_MOE_DATA_ARCHS/s/12\.0f"/12.0f;12.1f"/g' CMakeLists.txt && \
+    echo "CMake arch lists updated for GB10 (12.1)" ; \
 fi
 
 # ============================================================================
@@ -342,11 +349,12 @@ RUN chmod +x /tmp/patch_flashinfer_fp4.sh && /tmp/patch_flashinfer_fp4.sh
 # are CUDA-graph-capturable (no .item() calls, no GPU→CPU transfers).
 
 # ============================================================================
-# Fix Qwen3Next doubled prefix in create_qkvz_proj (MUST be AFTER pip install)
+# Fix Qwen3Next/Qwen3.5 doubled prefix (MUST be AFTER pip install)
 # ============================================================================
 # Bug: Both caller and create_qkvz_proj append '.in_proj_qkvz' to prefix,
 # creating 'model.layers.X.linear_attn.in_proj_qkvz.in_proj_qkvz' which
 # doesn't match the quantization ignore list, causing weight loading failures.
+# NOTE: vLLM v0.19.0 may already include this fix. Script is idempotent.
 # ============================================================================
 COPY fix_qwen3_next_prefix.py /workspace/dgx-vllm-build/fix_qwen3_next_prefix.py
 RUN python3 /workspace/dgx-vllm-build/fix_qwen3_next_prefix.py
@@ -393,14 +401,15 @@ WORKDIR /app/vllm
 EXPOSE 8888 6379
 
 # Version metadata
-LABEL version="22"
-LABEL build_date="2026-02-18"
-LABEL vllm_source="3b30e6150-patched"
+LABEL version="23"
+LABEL build_date="2026-04-16"
+LABEL vllm_source="v0.19.0-patched"
 LABEL pytorch_version="stable-cu130"
 LABEL compute_capability="12.1a-gb10"
 LABEL quantization_support="fp8-nvfp4"
 LABEL sm121_fp8_backend="torch-scaled-mm-fallback"
 LABEL moe_config="gb10-custom-tuned"
+LABEL qwen35_support="qwen3_5.py+qwen3_5_mtp.py"
 LABEL maintainer="avarok"
 
 # Healthcheck

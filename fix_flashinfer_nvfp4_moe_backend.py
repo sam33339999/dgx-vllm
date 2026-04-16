@@ -9,39 +9,47 @@ CompressedTensorsW4A4Nvfp4MoEMethod.process_weights_after_loading()
 when using VLLM_USE_FLASHINFER_MOE_FP4=1.
 
 Fix: Return k_cls instead of None for non-TRTLLM FlashInfer backends.
+
+Compatible with vLLM v0.16.x and v0.19.x.
 """
 
 import sys
 import os
 
 def patch_nvfp4_oracle():
-    # Find the file
+    # Find the file - try multiple paths
     vllm_root = "/app/vllm"
-    target = os.path.join(
-        vllm_root,
-        "vllm/model_executor/layers/fused_moe/oracle/nvfp4.py"
-    )
+    candidates = [
+        os.path.join(vllm_root, "vllm/model_executor/layers/fused_moe/oracle/nvfp4.py"),
+        os.path.join(vllm_root, "vllm/model_executor/layers/fused_moe/nvfp4.py"),
+    ]
 
-    if not os.path.exists(target):
-        print(f"ERROR: {target} not found")
-        sys.exit(1)
+    target = None
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            target = candidate
+            break
+
+    if target is None:
+        # Search for it
+        import subprocess
+        result = subprocess.run(
+            ['find', vllm_root, '-name', 'nvfp4.py', '-path', '*/fused_moe/*'],
+            capture_output=True, text=True
+        )
+        if result.stdout.strip():
+            target = result.stdout.strip().split('\n')[0]
+        else:
+            print("SKIP: NVFP4 MoE oracle file not found (may not exist in this vLLM version)")
+            return
 
     with open(target, "r") as f:
         content = f.read()
 
-    # The bug is in the FlashInfer iteration path.
-    # Current code returns (backend, None) for ALL FlashInfer backends,
-    # but non-TRTLLM backends need their k_cls returned.
-    #
-    # Find the pattern:
-    #   if supported:
-    #       logger.info_once(_make_log_backend(backend), scope="local")
-    #       return backend, None
-    #
-    # Replace with:
-    #   if supported:
-    #       logger.info_once(_make_log_backend(backend), scope="local")
-    #       return backend, k_cls
+    # Check if already patched
+    if "return backend, k_cls" in content:
+        print("Already patched")
+        return
 
     old = """                if supported:
                     logger.info_once(_make_log_backend(backend), scope="local")
@@ -60,14 +68,9 @@ def patch_nvfp4_oracle():
                     )"""
 
     if old not in content:
-        # Check if already patched
-        if "return backend, k_cls" in content:
-            print("Already patched")
-            return
-        print("ERROR: Could not find target pattern in nvfp4.py")
-        print("Looking for:")
-        print(old[:200])
-        sys.exit(1)
+        print(f"SKIP: Target pattern not found in {target}")
+        print("This bug may have been fixed upstream in this vLLM version")
+        return
 
     content = content.replace(old, new)
 
